@@ -1,0 +1,19 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Whisper Finetune",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--stage=evaluate", 
+                     "--model=small.en", 
+                     "--eval_dataset_name=test",
+                     "--outdir=prompt0_lr1e-5_lower",
+                     "--eval_list_file=/scratches/dialfs/alta/th624/exp-th624/data/Linguaskill/flt/test_single_flt.tsv"
+                    ]
+        }
+    ]
+}
