@@ -51,6 +51,7 @@ def transcribe(
     args=None,
     st_time=-1,
     ed_time=-1,
+    for_cem: bool = False,
     **decode_options,
 ):
     """
@@ -177,7 +178,7 @@ def transcribe(
                 kwargs.pop("best_of", None)
 
             options = DecodingOptions(**kwargs, temperature=t)
-            decode_result = model.decode(segment, options)
+            decode_result = model.decode(segment, options, for_cem)
 
             needs_fallback = False
             if (

@@ -945,7 +945,6 @@ def evaluate(args, wtokenizer, list_path, dataset_name, ref_file=None):
         whisper_model = WhisperModelModule(args)
     if args.checkpoint:
         best_ckpt = open(os.path.join(args.outdir, 'best_ckpt')).read().split()[0]
-        print(torch.cuda.is_available())
         state_dict = torch.load(f'{args.outdir}/checkpoint/{best_ckpt}')
         state_dict = state_dict['state_dict']
         # print(state_dict.keys())
@@ -1054,6 +1053,96 @@ def gen_cem_data(args, wtokenizer, list_path, dataset_name, ref_file=None):
         whisper_model = SoftWhisperModelModule(args)
     else:
         whisper_model = WhisperModelModule(args)
+    if args.checkpoint:
+        best_ckpt = open(os.path.join(args.outdir, 'best_ckpt')).read().split()[0]
+        state_dict = torch.load(f'{args.outdir}/checkpoint/{best_ckpt}')
+        state_dict = state_dict['state_dict']
+        whisper_model.load_state_dict(state_dict, strict=False) # only load soft prompt embeddings
+        whisper_model = whisper_model.to(args.device)
+
+    if args.language == 'en' or args.task == 'translate':
+        std = EnglishTextNormalizer()
+    elif args.language == 'zh':
+        std = BasicTextNormalizer(split_letters=True)
+    else:
+        std = BasicTextNormalizer()
+    eval_datalist = load_audio_file_list(list_path)
+    check_output_dir(f'{args.outdir}/{args.task}')
+
+    reference_dict = {}
+    if ref_file:
+        for line in open(ref_file):
+            line = line.strip()
+            if '-hyp' in line:
+                audio_id = line.split()[0][:-5]
+                if len(line.split()) == 1:
+                    text = ''
+                else:
+                    text = line.split(None, 1)[1]
+            elif '-ref' in line:
+                pass
+            else:
+                audio_id = line.split()[0]
+                text = line.split(None, 2)[-1]
+            reference_dict[audio_id] = text.lower()
+    
+    print(reference_dict)
+
+    whisper_model.eval()
+    out_fname = f'{args.outdir}/{args.task}/{args.checkpoint}_{dataset_name}_beam{args.beam_size}_stamp{not args.notimestamp}'
+    if args.length_penalty:
+        out_fname += f'_lp_{args.length_penalty}'
+    if not args.suppress_blank:
+        out_fname += '_no_sup_blank'
+    out_no_norm_fname = out_fname + '_nonorm'
+    with open(out_fname, 'w') as fout, open(out_no_norm_fname, 'w') as forigin:
+        result_list = []
+        for audio_id, audio_path, text in eval_datalist:
+            if reference_dict:
+                reference = reference_dict[audio_id]
+            else:
+                reference = None
+            if text.startswith('st:'):
+                st_time, text = text.split(None, 1)
+                ed_time, text = text.split(None, 1)
+                st_time = int(float(st_time[3:]) * SAMPLE_RATE)
+                ed_time = int(float(ed_time[3:]) * SAMPLE_RATE)
+            else:
+                st_time, ed_time = -1, -1
+            with torch.no_grad():
+                result = whisper_model.model.transcribe(audio_path, for_cem=True, task=args.task, language=args.language, without_timestamps=args.notimestamp, beam_size=args.beam_size, length_penalty=args.length_penalty, fp16=(args.device!='cpu' and not args.lora), condition_on_previous_text=args.condition_on_previous_text, initial_prompt=reference, args=args, suppress_tokens=args.suppress_tokens, st_time=st_time, ed_time=ed_time)
+                segments = []
+                for segment in result['segments']:
+                    segments.append(segment['text'].strip())
+                    print(segment['start'], segment['end'], segment['text'])
+                result_list.append([audio_id, ' '.join(segments), text_convert(text, norm=args.text_norm)])
+
+        o_errors, o_refs = 0, 0
+        errors, refs = 0, 0
+        for audio_id, hyp, ref in result_list:
+            forigin.write(f'{audio_id}-hyp: {hyp}\n')
+            forigin.write(f'{audio_id}-ref: {ref}\n')
+            o_errors += editdistance.eval(hyp.split(), ref.split())
+            o_refs += len(ref.split())
+
+            # Added for Linguaskill test set
+            ref = ref.replace('%hesitation%', '')
+            ref = re.sub(r'(\w+-)(\s|$)', r'', ref)
+            hyp = hyp.replace('%hesitation%', '')
+            hyp = re.sub(r'(\w+-)(\s|$)', r'', hyp)
+            hyp_tn, ref_tn = std(hyp), std(ref)
+            fout.write(f'{audio_id}-hyp: {hyp_tn}\n')
+            fout.write(f'{audio_id}-ref: {ref_tn}\n')
+            errors += editdistance.eval(hyp_tn.split(), ref_tn.split())
+            refs += len(ref_tn.split())
+
+        o_wers = o_errors / o_refs
+        print(o_errors, o_refs, o_wers)
+        forigin.write(f'=== errors: {o_errors}, refs: {o_refs}, wers: {o_wers} ===\n')
+        wers = errors / refs
+        print(errors, refs, wers)
+        fout.write(f'=== errors: {errors}, refs: {refs}, wers: {wers} ===\n')
+
 
 def evaluate_segment(args, wtokenizer, list_path, dataset_name):
     if args.n_decoder_prompts:
@@ -1222,5 +1311,11 @@ if __name__ == '__main__':
             evaluate_segment(args, wtokenizer, args.eval_list_file, args.eval_dataset_name, args.eval_ref_file)
         if args.test_list_file:
             evaluate_segment(args, wtokenizer, args.test_list_file, args.test_dataset_name, args.test_ref_file)
+    elif args.stage == 'gen_cem_data':
+        if args.eval_list_file:
+            gen_cem_data(args, wtokenizer, args.eval_list_file, args.eval_dataset_name, args.eval_ref_file)
+        if args.test_list_file:
+            gen_cem_data(args, wtokenizer, args.test_list_file, args.test_dataset_name, args.test_ref_file)
+
     else:
         assert 0

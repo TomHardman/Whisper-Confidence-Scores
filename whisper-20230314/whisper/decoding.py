@@ -126,6 +126,9 @@ class DecodingResult:
     temperature: float = np.nan
     compression_ratio: float = np.nan
     attn_weights: dict = field(default_factory=dict)
+    attn_states: Optional[Tensor] = None
+    dec_states: Optional[Tensor] = None
+    log_token_probs: Optional[List] = None
 
 
 class Inference:
@@ -143,11 +146,12 @@ class Inference:
 
 
 class PyTorchInference(Inference):
-    def __init__(self, model: "Whisper", initial_token_length: int):
+    def __init__(self, model: "Whisper", initial_token_length: int, for_cem: bool=False):
         self.model: "Whisper" = model
         self.initial_token_length = initial_token_length
         self.kv_cache = {}
         self.hooks = []
+        self.for_cem = for_cem
 
     def logits(self, tokens: Tensor, audio_features: Tensor) -> Tensor:
         if not self.kv_cache:
@@ -157,7 +161,8 @@ class PyTorchInference(Inference):
             # only need to use the last token except in the first forward pass
             tokens = tokens[:, -1:]
 
-        return self.model.decoder(tokens, audio_features, kv_cache=self.kv_cache)
+        return self.model.decoder(tokens, audio_features, kv_cache=self.kv_cache, 
+                                  for_cem=self.for_cem)
 
     def cleanup_caching(self):
         for hook in self.hooks:
@@ -504,7 +509,7 @@ class DecodingTask:
     decoder: TokenDecoder
     logit_filters: List[LogitFilter]
 
-    def __init__(self, model: "Whisper", options: DecodingOptions):
+    def __init__(self, model: "Whisper", options: DecodingOptions, for_cem: bool = False):
         self.model = model
 
         language = options.language or "en"
@@ -516,6 +521,7 @@ class DecodingTask:
         )
         self.tokenizer: Tokenizer = tokenizer
         self.options: DecodingOptions = self._verify_options(options)
+        self.for_cem = for_cem  # whether to record states for confidence estimation module
 
         self.n_group: int = options.beam_size or options.best_of or 1
         self.n_ctx: int = model.dims.n_text_ctx
@@ -530,7 +536,7 @@ class DecodingTask:
         self.sot_index: int = self.initial_tokens.index(tokenizer.sot)
 
         # inference: implements the forward pass through the decoder, including kv caching
-        self.inference = PyTorchInference(model, len(self.initial_tokens))
+        self.inference = PyTorchInference(model, len(self.initial_tokens), for_cem)
 
         # sequence ranker: implements how to rank a group of sampled sequences
         self.sequence_ranker = MaximumLikelihoodRanker(options.length_penalty)
@@ -673,12 +679,33 @@ class DecodingTask:
     def _main_loop(self, audio_features: Tensor, tokens: Tensor):
         assert audio_features.shape[0] == tokens.shape[0]
         n_batch = tokens.shape[0]
+        n_audio = n_batch // self.n_group
         sum_logprobs: Tensor = torch.zeros(n_batch, device=audio_features.device)
         no_speech_probs = [np.nan] * n_batch
 
+        if self.for_cem:
+            # keys are of form (token sub sequence, audio index)
+            attention_states = {} # dictionary to store attention states to be used by CEM
+            decoder_states = {} # dictionary to store decoder states to be used by CEM
+            token_sm_probs = {(self.initial_tokens, i): ([0, 0], 0) for i in range(n_audio)} # dictionary to store log token softmax probs for each sequence in form ([token probs], sequence prob)
+
         try:
             for i in range(self.sample_len):
-                logits = self.inference.logits(tokens, audio_features)
+                if not self.for_cem:
+                    logits = self.inference.logits(tokens, audio_features)
+              
+                else:
+                    logits, a_t, d_t = self.inference.logits(tokens, audio_features)
+                    a_t = a_t[:, -1]
+                    d_t = d_t[:, -1]
+                    
+                    # store attention and decoder states given previous tokens and audio
+                    for i, token_seq in enumerate(tokens):
+                        token_seq = tuple(token_seq.tolist())
+                        if (token_seq, i//self.n_group) not in attention_states:
+                            attention_states[(token_seq, i//self.n_group)] = a_t[i]
+                            decoder_states[(token_seq, i//self.n_group)] = d_t[i]
+                        pass
 
                 if (
                     i == 0 and self.tokenizer.no_speech is not None
@@ -698,6 +725,20 @@ class DecodingTask:
 
                 if completed or tokens.shape[-1] > self.n_ctx:
                     break
+
+                # update token softmax probs
+                if self.for_cem:
+                    token_sm_probs_new = {}
+                    for i, token_seq in enumerate(tokens):
+                        token_seq = tuple(token_seq.tolist())
+                        log_prob = sum_logprobs[i].item()
+                        prefix_probs = token_sm_probs[(token_seq[:-1], i//self.n_group)]
+                        token_prob = log_prob - prefix_probs[1]
+                        sequence_probs = prefix_probs[0] + [token_prob]
+                        token_sm_probs_new[(token_seq, i//self.n_group)] = (sequence_probs, log_prob)
+
+                    token_sm_probs = token_sm_probs_new
+
         finally:
             attn_dict = {}
             for key in self.inference.kv_cache:
@@ -705,7 +746,7 @@ class DecodingTask:
                     attn_dict[key] = self.inference.kv_cache[key]
             self.inference.cleanup_caching()
 
-        return tokens, sum_logprobs, no_speech_probs, attn_dict
+        return tokens, sum_logprobs, no_speech_probs, attn_dict, attention_states, decoder_states, token_sm_probs
 
     @torch.no_grad()
     def run(self, mel: Tensor) -> List[DecodingResult]:
@@ -733,7 +774,7 @@ class DecodingTask:
         tokens = tokens.repeat_interleave(self.n_group, dim=0).to(audio_features.device)
 
         # call the main sampling loop
-        tokens, sum_logprobs, no_speech_probs, attn_weights = self._main_loop(audio_features, tokens)
+        tokens, sum_logprobs, no_speech_probs, attn_weights, attention_states, decoder_states, token_sm_probs = self._main_loop(audio_features, tokens)
 
         # reshape the tensors to have (n_audio, n_group) as the first two dimensions
         audio_features = audio_features[:: self.n_group]
@@ -755,6 +796,35 @@ class DecodingTask:
         tokens: List[List[int]] = [t[i].tolist() for i, t in zip(selected, tokens)]
         texts: List[str] = [tokenizer.decode(t).strip() for t in tokens]
 
+        # for each sequence find attention and decoder states for each token
+        if self.for_cem:
+            attn_states_arr = [] # will become shape (n_audio, tokens in audio)
+            dec_states_arr = []
+            log_token_probs_arr = []
+            
+            for j in range(n_audio):
+                seq_a_states = torch.zeros((len(tokens[j]), self.model.dims.n_text_state))
+                seq_d_states = torch.zeros((len(tokens[j]), self.model.dims.n_text_state))
+                
+                token_seq = tuple(list(self.initial_tokens) + tokens[j])
+                seq_log_token_probs = token_sm_probs[(token_seq, j)][0][len(self.initial_tokens):]
+                
+                for i in range(len(tokens[j])):
+                    token_subseq = tuple(list(self.initial_tokens) + tokens[j][:i])
+                    attn_state = attention_states[(token_subseq, j)]
+                    dec_state = decoder_states[(token_subseq, j)]
+                    seq_a_states[i] = attn_state
+                    seq_d_states[i] = dec_state
+            
+                attn_states_arr.append(seq_a_states)
+                dec_states_arr.append(seq_d_states)
+                log_token_probs_arr.append(seq_log_token_probs)
+
+        # don't record if not using confidence estimation module
+        else:
+            attn_states_arr = [None for j in range(n_audio)]
+            dec_states_arr = [None for j in range(n_audio)]
+
         sum_logprobs: List[float] = [lp[i] for i, lp in zip(selected, sum_logprobs)]
         avg_logprobs: List[float] = [
             lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)
@@ -767,6 +837,9 @@ class DecodingTask:
             audio_features,
             avg_logprobs,
             no_speech_probs,
+            attn_states_arr,
+            dec_states_arr,
+            log_token_probs_arr,
         )
         if len(set(map(len, fields))) != 1:
             raise RuntimeError(f"inconsistent result lengths: {list(map(len, fields))}")
@@ -781,9 +854,12 @@ class DecodingTask:
                 no_speech_prob=no_speech_prob,
                 temperature=self.options.temperature,
                 compression_ratio=compression_ratio(text),
-                attn_weights=attn_weights
+                attn_weights=attn_weights,
+                attn_states=attn_states,
+                dec_states=dec_states,
+                log_token_probs=log_t_probs
             )
-            for text, language, tokens, features, avg_logprob, no_speech_prob in zip(
+            for text, language, tokens, features, avg_logprob, no_speech_prob, attn_states, dec_states, log_t_probs in zip(
                 *fields
             )
         ]
@@ -794,6 +870,7 @@ def decode(
     model: "Whisper",
     mel: Tensor,
     options: DecodingOptions = DecodingOptions(),
+    for_cem: bool = False, 
     **kwargs,
 ) -> Union[DecodingResult, List[DecodingResult]]:
     """
@@ -821,6 +898,6 @@ def decode(
     if kwargs:
         options = replace(options, **kwargs)
 
-    result = DecodingTask(model, options).run(mel)
+    result = DecodingTask(model, options, for_cem).run(mel)
 
     return result[0] if single else result

@@ -337,12 +337,18 @@ class ResidualAttentionBlock(nn.Module):
         xa: Optional[Tensor] = None,
         mask: Optional[Tensor] = None,
         kv_cache: Optional[dict] = None,
+        for_cem: bool = False,
     ):
         x = x + nn.functional.dropout(self.attn(self.attn_ln(x), mask=mask, kv_cache=kv_cache)[0], p=self.dropout, training=self.training)
         if self.cross_attn and self.ilm != 'nocross':
             x = x + nn.functional.dropout(self.cross_attn(self.cross_attn_ln(x), xa, kv_cache=kv_cache, ilm=self.ilm)[0], p=self.dropout, training=self.training)
-        x = x + nn.functional.dropout(self.mlp(self.mlp_ln(x)), p=self.dropout, training=self.training) # a_t = mlp_ln(x) - extract here
-        return x
+        if for_cem:
+            a_t = self.mlp_ln(x).clone()
+        x = x + nn.functional.dropout(self.mlp(self.mlp_ln(x)), p=self.dropout, training=self.training)
+        if not for_cem:
+            return x
+        else:
+            return x, a_t
 
 
 class AudioEncoder(nn.Module):
@@ -401,7 +407,7 @@ class TextDecoder(nn.Module):
         self.register_buffer("mask", mask, persistent=False)
         self.dropout = dropout
 
-    def forward(self, x: Tensor, xa: Tensor, kv_cache: Optional[dict] = None):
+    def forward(self, x: Tensor, xa: Tensor, kv_cache: Optional[dict] = None, for_cem: bool = False):
         """
         x : torch.LongTensor, shape = (batch_size, <= n_ctx)
             the text tokens
@@ -416,15 +422,24 @@ class TextDecoder(nn.Module):
         x = x.to(xa.dtype)
         x = nn.functional.dropout(x, p=self.dropout, training=self.training)
 
-        for block in self.blocks:
-            x = block(x, xa, mask=self.mask, kv_cache=kv_cache)
+        for i, block in enumerate(self.blocks):
+            if i == len(self.blocks) - 1 and for_cem: # if considering final block
+                x, a_t = block(x, xa, mask=self.mask, kv_cache=kv_cache, for_cem=True)
+            else:
+                x = block(x, xa, mask=self.mask, kv_cache=kv_cache)
 
-        x = self.ln(x) # ---> d_t
+        x = self.ln(x)
+        if for_cem: # obtain decoder state for CEM
+            d_t = x.clone()
         logits = (
             x @ torch.transpose(self.token_embedding.weight.to(x.dtype), 0, 1)
         ).float()
 
-        return logits
+        if not for_cem:
+            return logits
+        
+        else:
+            return logits, a_t, d_t
 
 
 class SoftTextDecoder(TextDecoder):
