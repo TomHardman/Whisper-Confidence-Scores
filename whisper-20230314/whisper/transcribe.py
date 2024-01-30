@@ -230,6 +230,9 @@ def transcribe(
             "compression_ratio": result.compression_ratio,
             "no_speech_prob": result.no_speech_prob,
             "attn_weights": result.attn_weights,
+            "attn_states": result.attn_states,
+            "dec_states": result.dec_states,
+            "log_token_probs": result.log_token_probs
         }
 
     # show the progress bar when verbose is False (if True, transcribed text will be printed)

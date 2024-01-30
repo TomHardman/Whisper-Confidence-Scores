@@ -723,21 +723,18 @@ class DecodingTask:
                 # expand the tokens tensor with the selected next tokens
                 tokens, completed = self.decoder.update(tokens, logits, sum_logprobs)
 
-                if completed or tokens.shape[-1] > self.n_ctx:
-                    break
-
                 # update token softmax probs
                 if self.for_cem:
-                    token_sm_probs_new = {}
                     for i, token_seq in enumerate(tokens):
                         token_seq = tuple(token_seq.tolist())
                         log_prob = sum_logprobs[i].item()
                         prefix_probs = token_sm_probs[(token_seq[:-1], i//self.n_group)]
                         token_prob = log_prob - prefix_probs[1]
                         sequence_probs = prefix_probs[0] + [token_prob]
-                        token_sm_probs_new[(token_seq, i//self.n_group)] = (sequence_probs, log_prob)
-
-                    token_sm_probs = token_sm_probs_new
+                        token_sm_probs[(token_seq, i//self.n_group)] = (sequence_probs, log_prob)
+                
+                if completed or tokens.shape[-1] > self.n_ctx:
+                    break
 
         finally:
             attn_dict = {}
