@@ -689,6 +689,11 @@ class DecodingTask:
             decoder_states = {} # dictionary to store decoder states to be used by CEM
             token_sm_probs = {(self.initial_tokens, i): ([0, 0], 0) for i in range(n_audio)} # dictionary to store log token softmax probs for each sequence in form ([token probs], sequence prob)
 
+        else:
+            attention_states = None
+            decoder_states = None
+            token_sm_probs = None
+
         try:
             for i in range(self.sample_len):
                 if not self.for_cem:
@@ -819,8 +824,9 @@ class DecodingTask:
 
         # don't record if not using confidence estimation module
         else:
-            attn_states_arr = [None for j in range(n_audio)]
-            dec_states_arr = [None for j in range(n_audio)]
+            attn_states_arr = [None for _ in range(n_audio)]
+            dec_states_arr = [None for _ in range(n_audio)]
+            log_token_probs_arr = [None for _ in range(n_audio)]
 
         sum_logprobs: List[float] = [lp[i] for i, lp in zip(selected, sum_logprobs)]
         avg_logprobs: List[float] = [

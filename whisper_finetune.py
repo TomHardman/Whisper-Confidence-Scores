@@ -23,9 +23,10 @@ from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from collections import Counter
 import numpy
 import whisper
+import csv
 print(whisper)
-from whisper.normalizers import EnglishTextNormalizer, BasicTextNormalizer
-from tqdm.notebook import tqdm
+from whisper.normalizers import EnglishTextNormalizer, BasicTextNormalizer, EnglishNumberNormalizer
+from tqdm import tqdm
 import pdb
 import collections
 import math
@@ -35,7 +36,7 @@ import re
 import loralib
 import time
 from whisper.audio import SAMPLE_RATE, TOKENS_PER_SECOND
-
+from alignment import token_align
 from transformers import (
     AdamW,
     get_linear_schedule_with_warmup
@@ -521,117 +522,6 @@ def rescoring_plt(args, wtokenizer, n_layers=32):
                 idx = idx + 1
 
 
-def debug(args, wtokenizer):
-    # Test dataset & dataloader
-    eval_datalist = load_audio_file_list(args.eval_list_file)
-
-    woptions = whisper.DecodingOptions(language=args.language, without_timestamps=args.notimestamp, beam_size=args.beam_size, fp16=(args.device!='cpu'))
-    if args.n_decoder_prompts:
-        wmodel = whisper.load_soft_model(args.model, device=args.device, download_root=args.model_dir, n_decoder_prompts=args.n_decoder_prompts, v2=args.v2, dropout=args.dropout)
-        init_embedding(wmodel, wtokenizer, args.n_decoder_prompts, args.device, args.initial_prompt_scheme, args.train_list_file)
-    else:
-        wmodel = whisper.load_model(args.model, device=args.device, download_root=args.model_dir, dropout=args.dropout, ilm=args.ilm, lora=args.lora, attention_window=args.attention_window, n_ctx=args.chunk_size * TOKENS_PER_SECOND, n_text_ctx=args.n_text_ctx)
-    dataset = SpeechDataset(eval_datalist, wtokenizer, args.sample_rate, args, args.text_norm, args.eval_ref_file)
-    loader = torch.utils.data.DataLoader(dataset, batch_size=5, collate_fn=WhisperDataCollatorWhithPadding())
-    wmodel.eval()
-
-    if args.checkpoint:
-        best_ckpt = open(os.path.join(args.outdir, 'best_ckpt')).read().split()[0]
-        state_dict = torch.load(f'{args.outdir}/checkpoint/{best_ckpt}', map_location=torch.device('cpu'))
-        state_dict = state_dict['state_dict']
-        # state_dict['decoder.learned_embedding'] = state_dict['model.decoder.learned_embedding']
-        wmodel.load_state_dict(state_dict, strict=False) # only load soft prompt embeddings
-
-    for b in loader:
-        print(b["labels"].shape)
-        print(b["input_ids"].shape)
-        print(b["dec_input_ids"].shape)
-
-        for token, dec in zip(b["labels"], b["dec_input_ids"]):
-            token[token == -100] = wtokenizer.eot
-            token = [t for t in token if t < wtokenizer.eot]
-            text = wtokenizer.decode(token) #, skip_special_tokens=True)
-            # print(text)
-
-            dec[dec == -100] = wtokenizer.eot
-            dec = [t for t in dec if t < wtokenizer.eot]
-            text = wtokenizer.decode(dec) #, skip_special_tokens=True)
-            # print(text)
-        break
-
-    # audio_features = wmodel.encoder(b["input_ids"].to(args.device))
-    # input_ids = b["input_ids"]
-    # labels = b["labels"].long()
-    # dec_input_ids = b["dec_input_ids"].long()
-
-    # audio_features = wmodel.encoder(input_ids.to(args.device))
-    # # print(dec_input_ids)
-    # # print(labels)
-    # print(input_ids.shape, dec_input_ids.shape, audio_features.shape)
-    # print(audio_features.shape)
-    # print()
-    # out = wmodel.decoder(dec_input_ids.to(args.device), audio_features)
-    # if args.n_decoder_prompts:
-    #     out = out[:, args.n_decoder_prompts:, :]
-
-    # print(out.shape)
-    # print(out.reshape(-1, out.size(-1)).shape)
-    # print(b["labels"].view(-1).shape)
-
-    # print('========')
-    # labels = b["labels"].long().tolist()
-    # tokens = torch.argmax(out, dim=2)
-    # for token, label in zip(tokens, labels):
-    #     token[token == -100] = wtokenizer.eot
-    #     label = [t for t in label if t < wtokenizer.eot]
-    #     token = [t for t in token if t < wtokenizer.eot]
-    #     token = token[:len(label)]
-    #     text = wtokenizer.decode(token) #, skip_special_tokens=True)
-    #     print(text)
-    #     print(wtokenizer.decode(label))
-
-    # results = wmodel.decode(b["input_ids"].to(args.device), woptions)
-    # for r in results:
-    #     print(r.text)
-
-    # print('========')
-    reference_dict = {}
-    # if args.eval_ref_file:
-    #     for line in open(args.eval_ref_file):
-    #         line = line.strip()
-    #         if '-hyp' in line:
-    #             audio_id = line.split()[0][:-5]
-    #             text = line.split(None, 1)[1]
-    #         elif '-ref' in line:
-    #             pass
-    #         else:
-    #             audio_id = line.split()[0]
-    #             text = line.split(None, 2)[-1]
-    #         reference_dict[audio_id] = text.lower()
-
-    for audio_id, audio_path, text in eval_datalist:
-        if reference_dict:
-            reference = reference_dict[audio_id]
-        else:
-            reference = None
-        if text.startswith('st:'):
-            st_time, text = text.split(None, 1)
-            ed_time, text = text.split(None, 1)
-            st_time = int(float(st_time[3:]) * SAMPLE_RATE)
-            ed_time = int(float(ed_time[3:]) * SAMPLE_RATE)
-        else:
-            st_time, ed_time = -1, -1
-        result = wmodel.transcribe(audio_path, language=args.language, without_timestamps=args.notimestamp, beam_size=args.beam_size, fp16=(args.device!='cpu'), suppress_blank=args.suppress_blank, condition_on_previous_text=args.condition_on_previous_text, initial_prompt=reference, args=args, st_time=st_time, ed_time=ed_time)
-        text = text_convert(text, args.text_norm)
-        # print(result)
-        segments = []
-        for segment in result["segments"]:
-            print(segment['start'], segment['end'], segment['text'])
-            segments.append(segment['text'].strip())
-        print(' '.join(segments))
-        print(text)
-
-
 class WhisperModelModule(LightningModule):
     def __init__(self, args) -> None:
         super().__init__()
@@ -1060,14 +950,11 @@ def gen_cem_data(args, wtokenizer, list_path, dataset_name, ref_file=None):
         whisper_model.load_state_dict(state_dict, strict=False) # only load soft prompt embeddings
         whisper_model = whisper_model.to(args.device)
 
-    if args.language == 'en' or args.task == 'translate':
-        std = EnglishTextNormalizer()
-    elif args.language == 'zh':
-        std = BasicTextNormalizer(split_letters=True)
-    else:
-        std = BasicTextNormalizer()
     eval_datalist = load_audio_file_list(list_path)
     check_output_dir(f'{args.outdir}/{args.task}')
+    whisper_model.eval()
+    out_fname = f'cem_data/{dataset_name}_beam{args.beam_size}.csv'
+    print(f'Outdir: {out_fname}')
 
     reference_dict = {}
     if ref_file:
@@ -1086,18 +973,9 @@ def gen_cem_data(args, wtokenizer, list_path, dataset_name, ref_file=None):
                 text = line.split(None, 2)[-1]
             reference_dict[audio_id] = text.lower()
     
-    print(reference_dict)
-
-    whisper_model.eval()
-    out_fname = f'{args.outdir}/{args.task}/{args.checkpoint}_{dataset_name}_beam{args.beam_size}_stamp{not args.notimestamp}'
-    if args.length_penalty:
-        out_fname += f'_lp_{args.length_penalty}'
-    if not args.suppress_blank:
-        out_fname += '_no_sup_blank'
-    out_no_norm_fname = out_fname + '_nonorm'
-    with open(out_fname, 'w') as fout, open(out_no_norm_fname, 'w') as forigin:
-        result_list = []
-        for audio_id, audio_path, text in eval_datalist:
+    with open(out_fname, 'w', newline='') as fout:
+        csv_writer = csv.writer(fout)
+        for audio_id, audio_path, text in tqdm(eval_datalist):
             if reference_dict:
                 reference = reference_dict[audio_id]
             else:
@@ -1111,38 +989,30 @@ def gen_cem_data(args, wtokenizer, list_path, dataset_name, ref_file=None):
                 st_time, ed_time = -1, -1
             with torch.no_grad():
                 result = whisper_model.model.transcribe(audio_path, for_cem=True, task=args.task, language=args.language, without_timestamps=args.notimestamp, beam_size=args.beam_size, length_penalty=args.length_penalty, fp16=(args.device!='cpu' and not args.lora), condition_on_previous_text=args.condition_on_previous_text, initial_prompt=reference, args=args, suppress_tokens=args.suppress_tokens, st_time=st_time, ed_time=ed_time)
-                segments = []
+                tokens = []
+                attn_features = []
+                dec_features = []
+                sm_probs = []
                 for segment in result['segments']:
-                    segments.append(segment['text'].strip())
-                    print(segment['start'], segment['end'], segment['text'])
-                result_list.append([audio_id, ' '.join(segments), text_convert(text, norm=args.text_norm)])
+                    tokens.extend(segment['tokens'])
+                    attn_features.extend(torch.unbind(segment['attn_states']))
+                    dec_features.extend(torch.unbind(segment['dec_states']))
+                    sm_probs.extend([np.exp(prob) for prob in segment['log_token_probs']])
+                
+            # obtain correctness lavels for tokens
+            ref_txt = text_convert(text, norm=args.text_norm)
+            ref = wtokenizer.encode(ref_txt)
+            token_truth_labels, incorrect = token_align(tokens, ref, wtokenizer)
+            
+            for token, attn_state, dec_state, sm_prob, label in zip(tokens, attn_features, dec_features, sm_probs, 
+                                                                    token_truth_labels):
+                emb = whisper_model.model.decoder.token_embedding(torch.tensor([token]).to('cuda')).to('cpu')
+                emb = torch.squeeze(emb)
+                data = torch.cat((torch.tensor([token]), attn_state, dec_state, emb, 
+                                    torch.tensor([sm_prob]), torch.tensor([label]))).tolist()
+                csv_writer.writerow(data)
 
-        o_errors, o_refs = 0, 0
-        errors, refs = 0, 0
-        for audio_id, hyp, ref in result_list:
-            forigin.write(f'{audio_id}-hyp: {hyp}\n')
-            forigin.write(f'{audio_id}-ref: {ref}\n')
-            o_errors += editdistance.eval(hyp.split(), ref.split())
-            o_refs += len(ref.split())
-
-            # Added for Linguaskill test set
-            ref = ref.replace('%hesitation%', '')
-            ref = re.sub(r'(\w+-)(\s|$)', r'', ref)
-            hyp = hyp.replace('%hesitation%', '')
-            hyp = re.sub(r'(\w+-)(\s|$)', r'', hyp)
-            hyp_tn, ref_tn = std(hyp), std(ref)
-            fout.write(f'{audio_id}-hyp: {hyp_tn}\n')
-            fout.write(f'{audio_id}-ref: {ref_tn}\n')
-            errors += editdistance.eval(hyp_tn.split(), ref_tn.split())
-            refs += len(ref_tn.split())
-
-        o_wers = o_errors / o_refs
-        print(o_errors, o_refs, o_wers)
-        forigin.write(f'=== errors: {o_errors}, refs: {o_refs}, wers: {o_wers} ===\n')
-        wers = errors / refs
-        print(errors, refs, wers)
-        fout.write(f'=== errors: {errors}, refs: {refs}, wers: {wers} ===\n')
-
+  
 
 def evaluate_segment(args, wtokenizer, list_path, dataset_name):
     if args.n_decoder_prompts:
@@ -1211,13 +1081,51 @@ def evaluate_segment(args, wtokenizer, list_path, dataset_name):
         fout.write(f'=== errors: {errors}, refs: {refs}, wers: {wers} ===\n')
 
 
+def analyse_text_content(wmodel, wtokenizer, list_path):
+    if args.n_decoder_prompts:
+        whisper_model = SoftWhisperModelModule(args)
+    else:
+        whisper_model = WhisperModelModule(args)
+    if args.checkpoint:
+        best_ckpt = open(os.path.join(args.outdir, 'best_ckpt')).read().split()[0]
+        state_dict = torch.load(f'{args.outdir}/checkpoint/{best_ckpt}')
+        state_dict = state_dict['state_dict']
+        whisper_model.load_state_dict(state_dict, strict=False) # only load soft prompt embeddings
+
+    std = EnglishTextNormalizer()
+    std_num = EnglishNumberNormalizer()
+    eval_datalist = load_audio_file_list(list_path)
+    check_output_dir(f'{args.outdir}/segment_transcribe')
+
+    whisper_model.eval()
+    diff_count = 0
+    seg_count = 0
+    for audio_id, audio_path, text in eval_datalist:
+        result_list = defaultdict(list)
+        with torch.no_grad():
+            result = whisper_model.model.transcribe(audio_path, language=args.language, without_timestamps=args.notimestamp, beam_size=args.beam_size, length_penalty=args.length_penalty, fp16=(args.device!='cpu'), condition_on_previous_text=args.condition_on_previous_text, args=args)
+            for ii, segment in enumerate(result['segments']):
+                result_list[audio_id].append([ii, segment['text'].strip(), text_convert(text, norm=args.text_norm)])
+            
+            for audio_id in result_list:
+                hyp_list = []
+                for ii, hyp, ref in result_list[audio_id]:
+                    hyp = std_num(hyp)
+                    ref = std_num(ref)
+                    if hyp != std(hyp):
+                        diff_count += 1
+                    seg_count +=1
+                    print(hyp)
+                    print(f'Current non-norm rate {diff_count/seg_count}')
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Transcribe wav files in a wav list')
     parser.add_argument('--model', type=str, default='small.en', help='name of the pretrained model')
     parser.add_argument('--outdir', type=str, default='', help='output directory to save the transcribed data in jsonl format')
     parser.add_argument('--checkpoint', type=str2bool, default=True, help='Saved checkpoint path')
     parser.add_argument('--init_ckpt', type=str, default='')
-    parser.add_argument('--model_dir', type=str, default='/scratches/dialfs/alta/th624/exp-th624/Whisper_flt/exp/small.en/prompt0_lr1e-5_lower', help='path to load model')
+    parser.add_argument('--model_dir', type=str, default='/home/mifs/th624/.cache/whisper', help='path to load model')
     parser.add_argument('--beam_size', type=int, default=5, help='output nbest with logprob for each token')
     parser.add_argument('--seed', type=int, default=1031, help='random seed')
     parser.add_argument('--notimestamp', type=str2bool, default=True, help='True: without_timestamps=True')
@@ -1232,7 +1140,9 @@ if __name__ == '__main__':
     parser.add_argument('--constant_lr', type=str2bool, default=False, help='True: use constant learning rate')
     parser.add_argument('--length_penalty', type=float, default=None)
     parser.add_argument('--train_list_file', type=str, default='/scratches/dialfs/mvse/mq227/whisper_mrx/linguaskill_data/train_combine/audio_ref_pair_list_20h')
-    parser.add_argument('--eval_list_file', type=str, default='')
+    parser.add_argument('--analyse_list_file', type=str, default='/scratches/dialfs/alta/th624/exp-th624/data/Linguaskill/flt/train_flt.tsv')
+    parser.add_argument('--eval_list_file', type=str, default='/scratches/dialfs/alta/th624/exp-th624/data/Linguaskill/flt/test_single_flt.tsv')
+    parser.add_argument('--cem_list_file', type=str, default='/scratches/dialfs/alta/th624/exp-th624/data/Linguaskill/flt/test_flt.tsv')
     parser.add_argument('--test_list_file', type=str, default='')
     parser.add_argument('--train_ref_file', type=str, default='')
     parser.add_argument('--eval_ref_file', type=str, default='')
@@ -1269,6 +1179,7 @@ if __name__ == '__main__':
     parser.add_argument('--language', type=str, default='en')
     parser.add_argument('--eval_dataset_name', type=str, default='dev_clean')
     parser.add_argument('--test_dataset_name', type=str, default='dev_other')
+    parser.add_argument('--cem_dataset_name', type=str, default='test')
     parser.add_argument('--stage', type=str, default='debug')
     parser.add_argument('--task', type=str, default='transcribe')
 
@@ -1313,9 +1224,10 @@ if __name__ == '__main__':
             evaluate_segment(args, wtokenizer, args.test_list_file, args.test_dataset_name, args.test_ref_file)
     elif args.stage == 'gen_cem_data':
         if args.eval_list_file:
-            gen_cem_data(args, wtokenizer, args.eval_list_file, args.eval_dataset_name, args.eval_ref_file)
-        if args.test_list_file:
-            gen_cem_data(args, wtokenizer, args.test_list_file, args.test_dataset_name, args.test_ref_file)
+            gen_cem_data(args, wtokenizer, args.cem_list_file, args.cem_dataset_name)
+    elif args.stage == 'analyse_text':
+            analyse_text_content(args, wtokenizer, args.analyse_list_file)
+
 
     else:
         assert 0
