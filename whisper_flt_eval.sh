@@ -17,4 +17,5 @@ python3 /scratches/dialfs/alta/th624/exp-th624/Whisper_flt/whisper_finetune.py \
     --stage evaluate \
     --model $model
 
-#python3 /scratches/dialfs/alta/th624/exp-th624/Whisper_flt/whisper_finetune.py --outdir  prompt0_lr1e-5_lower --cem_list_file /scratches/dialfs/alta/th624/exp-th624/data/Linguaskill/flt/test_single_flt.tsv --cem_dataset_name test --stage gen_cem_data --model small.en
+#python3 /scratches/dialfs/alta/th624/exp-th624/Whisper_flt/whisper_finetune.py --outdir  prompt0_lr1e-5_lower --cem_list_file /scratches/dialfs/alta/th624/exp-th624/data/Linguaskill/flt/test_flt.tsv --cem_dataset_name test --stage gen_cem_data --model small.en
+#python3 /scratches/dialfs/alta/th624/exp-th624/Whisper_flt/whisper_finetune.py --outdir  prompt0_lr1e-5_lower --cem_list_file /scratches/dialfs/alta/th624/exp-th624/data/Linguaskill/flt/train_flt.tsv --cem_dataset_name train --stage gen_cem_data --model small.en --enable_specaug True

@@ -705,11 +705,11 @@ class DecodingTask:
                     d_t = d_t[:, -1]
                     
                     # store attention and decoder states given previous tokens and audio
-                    for i, token_seq in enumerate(tokens):
+                    for j, token_seq in enumerate(tokens):
                         token_seq = tuple(token_seq.tolist())
-                        if (token_seq, i//self.n_group) not in attention_states:
-                            attention_states[(token_seq, i//self.n_group)] = a_t[i]
-                            decoder_states[(token_seq, i//self.n_group)] = d_t[i]
+                        if (token_seq, j//self.n_group) not in attention_states:
+                            attention_states[(token_seq, j//self.n_group)] = a_t[j]
+                            decoder_states[(token_seq, j//self.n_group)] = d_t[j]
                         pass
 
                 if (

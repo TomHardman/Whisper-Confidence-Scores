@@ -938,7 +938,7 @@ def evaluate(args, wtokenizer, list_path, dataset_name, ref_file=None):
             fout.write(f'=== bleu: {eval_results["bleu"]} ===\n')
 
 
-def gen_cem_data(args, wtokenizer, list_path, dataset_name, ref_file=None):
+def gen_cem_data(args, wtokenizer, list_path, dataset_name, ref_file=None, eval_in_situ=True):
     if args.n_decoder_prompts:
         whisper_model = SoftWhisperModelModule(args)
     else:
@@ -953,8 +953,15 @@ def gen_cem_data(args, wtokenizer, list_path, dataset_name, ref_file=None):
     eval_datalist = load_audio_file_list(list_path)
     check_output_dir(f'{args.outdir}/{args.task}')
     whisper_model.eval()
-    out_fname = f'cem_data/{dataset_name}_beam{args.beam_size}.csv'
-    print(f'Outdir: {out_fname}')
+
+    if args.enable_specaug:
+        spec_aug_ext = f'_SA{args.max_time_warp}_{args.max_freq_width}_{args.n_freq_mask}_{args.max_time_width}_{args.n_time_mask}'
+    else:
+        spec_aug_ext = ''
+
+    cem_out_fname = f'exp/cem_data/{dataset_name}_beam{args.beam_size}{spec_aug_ext}.csv'
+    transcribe_out_fname = f'{args.outdir}/{args.task}/{args.checkpoint}_{dataset_name}_beam{args.beam_size}_stamp{not args.notimestamp}_nonorm{spec_aug_ext}'
+    print(f'CEM Outdir: {cem_out_fname}')
 
     reference_dict = {}
     if ref_file:
@@ -973,8 +980,10 @@ def gen_cem_data(args, wtokenizer, list_path, dataset_name, ref_file=None):
                 text = line.split(None, 2)[-1]
             reference_dict[audio_id] = text.lower()
     
-    with open(out_fname, 'w', newline='') as fout:
-        csv_writer = csv.writer(fout)
+    with open(cem_out_fname, 'w', newline='') as cem_out, open(transcribe_out_fname, 'w') as t_out:
+        csv_writer = csv.writer(cem_out)
+        errors=0
+        refs=0
         for audio_id, audio_path, text in tqdm(eval_datalist):
             if reference_dict:
                 reference = reference_dict[audio_id]
@@ -1011,6 +1020,19 @@ def gen_cem_data(args, wtokenizer, list_path, dataset_name, ref_file=None):
                 data = torch.cat((torch.tensor([token]), attn_state, dec_state, emb, 
                                     torch.tensor([sm_prob]), torch.tensor([label]))).tolist()
                 csv_writer.writerow(data)
+            
+            # Write transcription data to file
+            hyp_txt = wtokenizer.decode(tokens)
+            t_out.write(f'{audio_id}-hyp: {hyp_txt}\n')
+            t_out.write(f'{audio_id}-ref: {ref_txt}\n')
+            
+            if eval_in_situ:
+                errors += len(incorrect)
+                refs += len(ref)
+                ter = errors/refs
+
+    if eval_in_situ:
+        print(f'Token error rate: {ter}')
 
   
 
@@ -1081,44 +1103,6 @@ def evaluate_segment(args, wtokenizer, list_path, dataset_name):
         fout.write(f'=== errors: {errors}, refs: {refs}, wers: {wers} ===\n')
 
 
-def analyse_text_content(wmodel, wtokenizer, list_path):
-    if args.n_decoder_prompts:
-        whisper_model = SoftWhisperModelModule(args)
-    else:
-        whisper_model = WhisperModelModule(args)
-    if args.checkpoint:
-        best_ckpt = open(os.path.join(args.outdir, 'best_ckpt')).read().split()[0]
-        state_dict = torch.load(f'{args.outdir}/checkpoint/{best_ckpt}')
-        state_dict = state_dict['state_dict']
-        whisper_model.load_state_dict(state_dict, strict=False) # only load soft prompt embeddings
-
-    std = EnglishTextNormalizer()
-    std_num = EnglishNumberNormalizer()
-    eval_datalist = load_audio_file_list(list_path)
-    check_output_dir(f'{args.outdir}/segment_transcribe')
-
-    whisper_model.eval()
-    diff_count = 0
-    seg_count = 0
-    for audio_id, audio_path, text in eval_datalist:
-        result_list = defaultdict(list)
-        with torch.no_grad():
-            result = whisper_model.model.transcribe(audio_path, language=args.language, without_timestamps=args.notimestamp, beam_size=args.beam_size, length_penalty=args.length_penalty, fp16=(args.device!='cpu'), condition_on_previous_text=args.condition_on_previous_text, args=args)
-            for ii, segment in enumerate(result['segments']):
-                result_list[audio_id].append([ii, segment['text'].strip(), text_convert(text, norm=args.text_norm)])
-            
-            for audio_id in result_list:
-                hyp_list = []
-                for ii, hyp, ref in result_list[audio_id]:
-                    hyp = std_num(hyp)
-                    ref = std_num(ref)
-                    if hyp != std(hyp):
-                        diff_count += 1
-                    seg_count +=1
-                    print(hyp)
-                    print(f'Current non-norm rate {diff_count/seg_count}')
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Transcribe wav files in a wav list')
     parser.add_argument('--model', type=str, default='small.en', help='name of the pretrained model')
@@ -1152,11 +1136,11 @@ if __name__ == '__main__':
     parser.add_argument('--lora', type=int, default=0)
     parser.add_argument('--chunk_size', type=int, default=30)
     parser.add_argument('--n_text_ctx', type=int, default=448)
-    parser.add_argument('--max_time_warp', type=int, default=80)
-    parser.add_argument('--max_freq_width', type=int, default=27)
+    parser.add_argument('--max_time_warp', type=int, default=5)
+    parser.add_argument('--max_freq_width', type=int, default=22)
     parser.add_argument('--n_freq_mask', type=int, default=2)
-    parser.add_argument('--max_time_width', type=int, default=100)
-    parser.add_argument('--n_time_mask', type=int, default=2)
+    parser.add_argument('--max_time_width', type=int, default=0)
+    parser.add_argument('--n_time_mask', type=int, default=0)
     parser.add_argument('--frozen', type=str, default='', help='frozen some parameters in the training')
     parser.add_argument('--sample_rate', type=int, default=16000)
     parser.add_argument('--val_check_interval', type=int, default=2500)
@@ -1202,9 +1186,7 @@ if __name__ == '__main__':
     wmodel = whisper.load_model(args.model, device=args.device, download_root=args.model_dir, dropout=args.dropout, ilm=False, lora=args.lora)
     wtokenizer = whisper.tokenizer.get_tokenizer(not args.model.endswith('.en'), language=args.language, task='transcribe', num_languages=wmodel.num_languages)
 
-    if args.stage == 'debug':
-        debug(args, wtokenizer)
-    elif args.stage == 'rescoring':
+    if args.stage == 'rescoring':
         rescoring(args, wtokenizer)
     elif args.stage == 'rescoring_plt':
         rescoring_plt(args, wtokenizer)
@@ -1225,9 +1207,6 @@ if __name__ == '__main__':
     elif args.stage == 'gen_cem_data':
         if args.eval_list_file:
             gen_cem_data(args, wtokenizer, args.cem_list_file, args.cem_dataset_name)
-    elif args.stage == 'analyse_text':
-            analyse_text_content(args, wtokenizer, args.analyse_list_file)
-
 
     else:
         assert 0
