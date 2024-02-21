@@ -959,7 +959,7 @@ def gen_cem_data(args, wtokenizer, list_path, dataset_name, ref_file=None, eval_
     else:
         spec_aug_ext = ''
 
-    cem_out_fname = f'exp/cem_data/{dataset_name}_beam{args.beam_size}{spec_aug_ext}.csv'
+    cem_out_fname = f'exp/cem_data/{args.model_type}/{dataset_name}_beam{args.beam_size}{spec_aug_ext}.csv'
     transcribe_out_fname = f'{args.outdir}/{args.task}/{args.checkpoint}_{dataset_name}_beam{args.beam_size}_stamp{not args.notimestamp}_nonorm{spec_aug_ext}'
     print(f'CEM Outdir: {cem_out_fname}')
 
@@ -1008,7 +1008,7 @@ def gen_cem_data(args, wtokenizer, list_path, dataset_name, ref_file=None, eval_
                     dec_features.extend(torch.unbind(segment['dec_states']))
                     sm_probs.extend([np.exp(prob) for prob in segment['log_token_probs']])
                 
-            # obtain correctness lavels for tokens
+            # obtain correctness labels for tokens
             ref_txt = text_convert(text, norm=args.text_norm)
             ref = wtokenizer.encode(ref_txt)
             token_truth_labels, incorrect = token_align(tokens, ref, wtokenizer)
@@ -1020,6 +1020,7 @@ def gen_cem_data(args, wtokenizer, list_path, dataset_name, ref_file=None, eval_
                 data = torch.cat((torch.tensor([token]), attn_state, dec_state, emb, 
                                     torch.tensor([sm_prob]), torch.tensor([label]))).tolist()
                 csv_writer.writerow(data)
+
             
             # Write transcription data to file
             hyp_txt = wtokenizer.decode(tokens)
@@ -1126,7 +1127,7 @@ if __name__ == '__main__':
     parser.add_argument('--train_list_file', type=str, default='/scratches/dialfs/mvse/mq227/whisper_mrx/linguaskill_data/train_combine/audio_ref_pair_list_20h')
     parser.add_argument('--analyse_list_file', type=str, default='/scratches/dialfs/alta/th624/exp-th624/data/Linguaskill/flt/train_flt.tsv')
     parser.add_argument('--eval_list_file', type=str, default='/scratches/dialfs/alta/th624/exp-th624/data/Linguaskill/flt/test_single_flt.tsv')
-    parser.add_argument('--cem_list_file', type=str, default='/scratches/dialfs/alta/th624/exp-th624/data/Linguaskill/flt/test_flt.tsv')
+    parser.add_argument('--cem_list_file', type=str, default='/scratches/dialfs/alta/th624/exp-th624/data/Linguaskill/gec/test_gec.tsv')
     parser.add_argument('--test_list_file', type=str, default='')
     parser.add_argument('--train_ref_file', type=str, default='')
     parser.add_argument('--eval_ref_file', type=str, default='')
@@ -1166,6 +1167,7 @@ if __name__ == '__main__':
     parser.add_argument('--cem_dataset_name', type=str, default='test')
     parser.add_argument('--stage', type=str, default='debug')
     parser.add_argument('--task', type=str, default='transcribe')
+    parser.add_argument('--model_type', type=str, required=True)
 
     args = parser.parse_args()
     args.device = 'cuda' if torch.cuda.is_available() else 'cpu'

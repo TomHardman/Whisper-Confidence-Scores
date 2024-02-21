@@ -38,14 +38,14 @@ def predict_confidence_scores(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Transcribe wav files in a wav list')
-    parser.add_argument('--ckpt_path', type=str, default='', help='path to the pretrained model')
-    parser.add_argument('--eval_file_path', type=str, default='/scratches/dialfs/alta/th624/exp-th624/Whisper_flt/exp/cem_data/test_beam5_inverted.pkl', help='path to pickled test dataframe')
+    parser.add_argument('--ckpt_path', type=str, default='/scratches/dialfs/alta/th624/exp-th624/Whisper_flt/exp/cem_models/flt/train_beam5_SA10_30_2_50_2_inverted/16_pw1.0_usedec0/epoch19_f0.45128_loss0.145_auc0.39828_UCE0.0789.pt', help='path to the pretrained model')
+    parser.add_argument('--eval_file_path', type=str, default='/scratches/dialfs/alta/th624/exp-th624/Whisper_flt/exp/cem_data/gec/test_gec_beam5_inverted.pkl', help='path to pickled test dataframe')
     parser.add_argument('--batch_size', type=int, default=100, help='Batch Size')
     parser.add_argument('--hidden_units', type=int, help='number of hidden units for simple CEM')
-    parser.add_argument('--outfile', type=str, help='path to save prediction')
     parser.add_argument('--use_dec', type=int, default=0, help='whether to use decoder state in feature vector')
     args = parser.parse_args()
     
     data = predict_confidence_scores(args)
-    with open(args.outfile, 'wb') as f:
+    preds_file = '.'.join(args.ckpt_path.split('.')[:-1]) + '_preds.pkl'
+    with open(preds_file, 'wb') as f:
         pickle.dump(data, f)

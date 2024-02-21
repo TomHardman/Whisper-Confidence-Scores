@@ -7,7 +7,7 @@ import numpy as np
 
 
 class SimpleCEM(nn.Module):
-    def __init__(self, n: int, no_dec: bool = False):
+    def __init__(self, n: int, no_dec: bool = False, return_logits: bool = False):
         super().__init__()
         if no_dec:
             inp_size = 1537
@@ -17,6 +17,7 @@ class SimpleCEM(nn.Module):
         # Define layers with specified input and output sizes
         self.fc_layer = nn.Linear(inp_size, n)
         self.output_layer = nn.Linear(n, 1)
+        self.return_logits = return_logits
 
         # Sigmoid activation function
         self.sigmoid = nn.Sigmoid()
@@ -28,11 +29,26 @@ class SimpleCEM(nn.Module):
         # Forward pass through each layer
         x = torch.relu(self.fc_layer(x))
         logits = self.output_layer(x)
+
+        if self.return_logits:
+            return logits
         
         # Apply sigmoid activation to get the final output
         output = self.sigmoid(logits)
         
         return output
+
+
+class TemperatureCalibrator(nn.Module):
+    def __init__(self, whisper_model):
+        super().__init__
+        self.linear = whisper_model.decoder.token_embedding
+        self.single_unit = nn.Linear()
+    
+    def forward(self, x):
+        x = (x @ torch.transpose(self.linear.weight.to(x.dtype), 0, 1)).float()
+
+
 
 
 class CEMSkip(nn.Module):
