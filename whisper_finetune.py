@@ -959,7 +959,7 @@ def gen_cem_data(args, wtokenizer, list_path, dataset_name, ref_file=None, eval_
     else:
         spec_aug_ext = ''
 
-    cem_out_fname = f'exp/cem_data/{args.model_type}/{dataset_name}_beam{args.beam_size}{spec_aug_ext}.csv'
+    cem_out_fname = f'exp/cem_data/{args.model_type}/{dataset_name}_beam{args.beam_size}{spec_aug_ext}_layer{args.cem_layer}.csv'
     transcribe_out_fname = f'{args.outdir}/{args.task}/{args.checkpoint}_{dataset_name}_beam{args.beam_size}_stamp{not args.notimestamp}_nonorm{spec_aug_ext}'
     print(f'CEM Outdir: {cem_out_fname}')
 
@@ -997,7 +997,7 @@ def gen_cem_data(args, wtokenizer, list_path, dataset_name, ref_file=None, eval_
             else:
                 st_time, ed_time = -1, -1
             with torch.no_grad():
-                result = whisper_model.model.transcribe(audio_path, for_cem=True, task=args.task, language=args.language, without_timestamps=args.notimestamp, beam_size=args.beam_size, length_penalty=args.length_penalty, fp16=(args.device!='cpu' and not args.lora), condition_on_previous_text=args.condition_on_previous_text, initial_prompt=reference, args=args, suppress_tokens=args.suppress_tokens, st_time=st_time, ed_time=ed_time)
+                result = whisper_model.model.transcribe(audio_path, for_cem=True, cem_layer=args.cem_layer, task=args.task, language=args.language, without_timestamps=args.notimestamp, beam_size=args.beam_size, length_penalty=args.length_penalty, fp16=(args.device!='cpu' and not args.lora), condition_on_previous_text=args.condition_on_previous_text, initial_prompt=reference, args=args, suppress_tokens=args.suppress_tokens, st_time=st_time, ed_time=ed_time)
                 tokens = []
                 attn_features = []
                 dec_features = []
@@ -1168,6 +1168,7 @@ if __name__ == '__main__':
     parser.add_argument('--stage', type=str, default='debug')
     parser.add_argument('--task', type=str, default='transcribe')
     parser.add_argument('--model_type', type=str, required=True)
+    parser.add_argument('--cem_layer', type=int, default=-1)
 
     args = parser.parse_args()
     args.device = 'cuda' if torch.cuda.is_available() else 'cpu'

@@ -407,13 +407,19 @@ class TextDecoder(nn.Module):
         self.register_buffer("mask", mask, persistent=False)
         self.dropout = dropout
 
-    def forward(self, x: Tensor, xa: Tensor, kv_cache: Optional[dict] = None, for_cem: bool = False):
+    def forward(self, x: Tensor, xa: Tensor, kv_cache: Optional[dict] = None, for_cem: bool = False,
+                cem_layer: int =-1):
         """
         x : torch.LongTensor, shape = (batch_size, <= n_ctx)
             the text tokens
         xa : torch.Tensor, shape = (batch_size, n_mels, n_audio_ctx)
             the encoded audio features to be attended on
         """
+        if cem_layer == -1:
+            cem_layer == len(self.blocks)
+        elif cem_layer > len(self.blocks) or cem_layer < 1:
+            raise ValueError(f'cem layer = {cem_layer} not valid, must be between 1 and {len(self.blocks)}')
+
         offset = next(iter(kv_cache.values())).shape[1] if kv_cache else 0
         x = (
             self.token_embedding(x)
@@ -423,14 +429,13 @@ class TextDecoder(nn.Module):
         x = nn.functional.dropout(x, p=self.dropout, training=self.training)
 
         for i, block in enumerate(self.blocks):
-            if i == len(self.blocks) - 1 and for_cem: # if considering final block
+            if i == cem_layer - 1 and for_cem: # if considering layer of interest
                 x, a_t = block(x, xa, mask=self.mask, kv_cache=kv_cache, for_cem=True)
+                d_t = self.ln(x.clone())
             else:
                 x = block(x, xa, mask=self.mask, kv_cache=kv_cache)
 
         x = self.ln(x)
-        if for_cem: # obtain decoder state for CEM
-            d_t = x.clone()
         logits = (
             x @ torch.transpose(self.token_embedding.weight.to(x.dtype), 0, 1)
         ).float()

@@ -146,12 +146,14 @@ class Inference:
 
 
 class PyTorchInference(Inference):
-    def __init__(self, model: "Whisper", initial_token_length: int, for_cem: bool=False):
+    def __init__(self, model: "Whisper", initial_token_length: int, for_cem: bool=False,
+                 cem_layer: int=-1):
         self.model: "Whisper" = model
         self.initial_token_length = initial_token_length
         self.kv_cache = {}
         self.hooks = []
         self.for_cem = for_cem
+        self.cem_layer = cem_layer
 
     def logits(self, tokens: Tensor, audio_features: Tensor) -> Tensor:
         if not self.kv_cache:
@@ -162,7 +164,7 @@ class PyTorchInference(Inference):
             tokens = tokens[:, -1:]
 
         return self.model.decoder(tokens, audio_features, kv_cache=self.kv_cache, 
-                                  for_cem=self.for_cem)
+                                  for_cem=self.for_cem, cem_layer=self.cem_layer)
 
     def cleanup_caching(self):
         for hook in self.hooks:
@@ -509,7 +511,8 @@ class DecodingTask:
     decoder: TokenDecoder
     logit_filters: List[LogitFilter]
 
-    def __init__(self, model: "Whisper", options: DecodingOptions, for_cem: bool = False):
+    def __init__(self, model: "Whisper", options: DecodingOptions, for_cem: bool = False,
+                 cem_layer: int =-1):
         self.model = model
 
         language = options.language or "en"
@@ -522,6 +525,7 @@ class DecodingTask:
         self.tokenizer: Tokenizer = tokenizer
         self.options: DecodingOptions = self._verify_options(options)
         self.for_cem = for_cem  # whether to record states for confidence estimation module
+        self.cem_layer = cem_layer # layer to use for generating cem data
 
         self.n_group: int = options.beam_size or options.best_of or 1
         self.n_ctx: int = model.dims.n_text_ctx
@@ -536,7 +540,7 @@ class DecodingTask:
         self.sot_index: int = self.initial_tokens.index(tokenizer.sot)
 
         # inference: implements the forward pass through the decoder, including kv caching
-        self.inference = PyTorchInference(model, len(self.initial_tokens), for_cem)
+        self.inference = PyTorchInference(model, len(self.initial_tokens), for_cem, cem_layer)
 
         # sequence ranker: implements how to rank a group of sampled sequences
         self.sequence_ranker = MaximumLikelihoodRanker(options.length_penalty)
@@ -873,7 +877,8 @@ def decode(
     model: "Whisper",
     mel: Tensor,
     options: DecodingOptions = DecodingOptions(),
-    for_cem: bool = False, 
+    for_cem: bool = False,
+    cem_layer: int = -1, 
     **kwargs,
 ) -> Union[DecodingResult, List[DecodingResult]]:
     """
@@ -901,6 +906,6 @@ def decode(
     if kwargs:
         options = replace(options, **kwargs)
 
-    result = DecodingTask(model, options, for_cem).run(mel)
+    result = DecodingTask(model, options, for_cem, cem_layer).run(mel)
 
     return result[0] if single else result
