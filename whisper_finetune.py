@@ -960,7 +960,7 @@ def gen_cem_data(args, wtokenizer, list_path, dataset_name, ref_file=None, eval_
         spec_aug_ext = ''
 
     cem_out_fname = f'exp/cem_data/{args.model_type}/{dataset_name}_beam{args.beam_size}{spec_aug_ext}_layer{args.cem_layer}.csv'
-    transcribe_out_fname = f'{args.outdir}/{args.task}/{args.checkpoint}_{dataset_name}_beam{args.beam_size}_stamp{not args.notimestamp}_nonorm{spec_aug_ext}'
+    transcribe_out_fname = f'{args.outdir}/{args.task}/{args.checkpoint}_{dataset_name}_beam{args.beam_size}_stamp{not args.notimestamp}_nonorm{spec_aug_ext}_layer{args.cem_layer}'
     print(f'CEM Outdir: {cem_out_fname}')
 
     reference_dict = {}
@@ -1002,11 +1002,25 @@ def gen_cem_data(args, wtokenizer, list_path, dataset_name, ref_file=None, eval_
                 attn_features = []
                 dec_features = []
                 sm_probs = []
-                for segment in result['segments']:
-                    tokens.extend(segment['tokens'])
+                for i, segment in enumerate(result['segments']):
+                    seg_tokens = segment['tokens']
+                    if i >= 1: # if concatenating segments convert first token to token with preceding whitespace so text is produced correctly
+                        seg_tokens[0] = wtokenizer.encode(' ' + wtokenizer.decode([seg_tokens[0]]))[0]
+
+                    tokens.extend(seg_tokens)
                     attn_features.extend(torch.unbind(segment['attn_states']))
                     dec_features.extend(torch.unbind(segment['dec_states']))
                     sm_probs.extend([np.exp(prob) for prob in segment['log_token_probs']])
+            
+            # try decoding and re-encoding hypothesised tokens so form will be the same as encoded ref tokens
+            try:
+                tokens_new = wtokenizer.encode(wtokenizer.decode(tokens))
+                if len(tokens_new) != len(tokens):
+                    raise ValueError()
+                else:
+                    tokens = tokens_new
+            except ValueError:
+                pass
                 
             # obtain correctness labels for tokens
             ref_txt = text_convert(text, norm=args.text_norm)

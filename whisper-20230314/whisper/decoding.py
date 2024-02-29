@@ -737,7 +737,7 @@ class DecodingTask:
                     for i, token_seq in enumerate(tokens):
                         token_seq = tuple(token_seq.tolist())
                         log_prob = sum_logprobs[i].item()
-                        prefix_probs = token_sm_probs[(token_seq[:-1], i//self.n_group)]
+                        prefix_probs = token_sm_probs[(token_seq[:-1], i//self.n_group)] # i//self.n_group refers to the specific audio
                         token_prob = log_prob - prefix_probs[1]
                         sequence_probs = prefix_probs[0] + [token_prob]
                         token_sm_probs[(token_seq, i//self.n_group)] = (sequence_probs, log_prob)
@@ -813,7 +813,7 @@ class DecodingTask:
                 seq_d_states = torch.zeros((len(tokens[j]), self.model.dims.n_text_state))
                 
                 token_seq = tuple(list(self.initial_tokens) + tokens[j])
-                seq_log_token_probs = token_sm_probs[(token_seq, j)][0][len(self.initial_tokens):]
+                seq_log_token_probs = token_sm_probs[(token_seq, j)][0][-len(tokens[j]):]
                 
                 for i in range(len(tokens[j])):
                     token_subseq = tuple(list(self.initial_tokens) + tokens[j][:i])

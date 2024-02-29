@@ -416,7 +416,7 @@ class TextDecoder(nn.Module):
             the encoded audio features to be attended on
         """
         if cem_layer == -1:
-            cem_layer == len(self.blocks)
+            cem_layer = len(self.blocks)
         elif cem_layer > len(self.blocks) or cem_layer < 1:
             raise ValueError(f'cem layer = {cem_layer} not valid, must be between 1 and {len(self.blocks)}')
 
