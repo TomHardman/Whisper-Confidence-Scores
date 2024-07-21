@@ -1,2 +1,5 @@
 /exp/
 /cem_data/
+*.pkl
+*.png
+*.pyc

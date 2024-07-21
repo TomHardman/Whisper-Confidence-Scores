@@ -7,15 +7,10 @@ import pickle
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 def predict_confidence_scores(args):
-    if args.use_dec:
-        no_dec = False
-    else:
-        no_dec = True
-    
-    test_dataset = ConfidenceDataset(args.eval_file_path, no_dec=no_dec)
+    test_dataset = ConfidenceDataset(args.eval_file_path, feature_mode=args.mode, pred_mode=args.pred_mode)
     test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
 
-    confidence_model = SimpleCEM(no_dec=no_dec, n=args.hidden_units).to(device)
+    confidence_model = SimpleCEM(feature_mode=args.mode, n=args.hidden_units, norm=args.norm).to(device)
     saved_model = torch.load(args.ckpt_path)
     confidence_model.load_state_dict(saved_model['model_state_dict'])
     
@@ -38,14 +33,16 @@ def predict_confidence_scores(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Transcribe wav files in a wav list')
-    parser.add_argument('--ckpt_path', type=str, default='/scratches/dialfs/alta/th624/exp-th624/Whisper_flt/exp/cem_models/flt/train_beam5_SA10_30_2_50_2_inverted/16_pw1.0_usedec0/epoch19_f0.45128_loss0.145_auc0.39828_UCE0.0789.pt', help='path to the pretrained model')
-    parser.add_argument('--eval_file_path', type=str, default='/scratches/dialfs/alta/th624/exp-th624/Whisper_flt/exp/cem_data/gec/test_gec_beam5_inverted.pkl', help='path to pickled test dataframe')
+    parser.add_argument('--ckpt_path', type=str, default='/scratches/dialfs/alta/th624/exp-th624/Whisper_flt/exp/cem_models/flt/train_flt_beam5_SA5_22_2_0_0_layer-1_data_word/16_pw1.0_no_dec_norm0_poolmax_probmax/ep13_f0.43870_loss0.147_auc0.38867_UCE0.0876.pt', help='path to the pretrained model')
+    parser.add_argument('--eval_file_path', type=str, default='/scratches/dialfs/alta/th624/exp-th624/Whisper_flt/exp/cem_data/gec/dev_gec_beam5_layer6_data.pkl', help='path to pickled dev dataframe')
     parser.add_argument('--batch_size', type=int, default=100, help='Batch Size')
     parser.add_argument('--hidden_units', type=int, help='number of hidden units for simple CEM')
-    parser.add_argument('--use_dec', type=int, default=0, help='whether to use decoder state in feature vector')
+    parser.add_argument('--mode', type=str, required=True, help='Determines which parts of feature vector are to be fed to model: "emb_only", "no_dec", "no_prob", "all"')
+    parser.add_argument('--norm', type=int, default=0)
+    parser.add_argument('--pred_mode', type=str, required=True)
     args = parser.parse_args()
     
     data = predict_confidence_scores(args)
-    preds_file = '.'.join(args.ckpt_path.split('.')[:-1]) + '_preds.pkl'
+    preds_file = '.'.join(args.ckpt_path.split('.')[:-1]) + '_preds_dev.pkl'
     with open(preds_file, 'wb') as f:
         pickle.dump(data, f)

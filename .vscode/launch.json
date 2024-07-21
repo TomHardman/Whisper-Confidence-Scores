@@ -2,7 +2,15 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Whisper Finetune",
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Whisper Gen CEM Data",
             "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/whisper_finetune.py",
@@ -10,10 +18,25 @@
             "justMyCode": false,
             "args": ["--stage=gen_cem_data", 
                      "--model=small.en", 
-                     "--eval_dataset_name=test",
-                     "--outdir=prompt0_lr1e-5_lower",
-                     "--eval_list_file=/scratches/dialfs/alta/th624/exp-th624/data/Linguaskill/flt/test_single_flt.tsv"
+                     "--cem_dataset_name=test_toy",
+                     "--outdir=flt_prompt0_lr1e-5_lower",
+                     "--model_type=flt",
+                     "--cem_list_file=/scratches/dialfs/alta/th624/exp-th624/data/Linguaskill/flt/test_single_flt.tsv"
+                    ]
+        },
+        {
+            "name": "CEM Predict",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/cem_predict.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--hidden_units=256",
+                     "--use_dec=0",
+                     "--ckpt_path=/scratches/dialfs/alta/th624/exp-th624/Whisper_flt/exp/cem_models/simple256_logp_ilr1e-3_nodec_w5/ckpt_epoch8_f0.42847_loss0.461_auc0.42626.pt",
+                     "--outfile=/scratches/dialfs/alta/th624/exp-th624/Whisper_flt/exp/cem_data/preds/test_preds_simple256_nodec_w5_logp.pkl"
                     ]
         }
+
     ]
 }

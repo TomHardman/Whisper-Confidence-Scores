@@ -1024,20 +1024,24 @@ def gen_cem_data(args, wtokenizer, list_path, dataset_name, ref_file=None, eval_
                 
             # obtain correctness labels for tokens
             ref_txt = text_convert(text, norm=args.text_norm)
+            hyp_txt = wtokenizer.decode(tokens)
             ref = wtokenizer.encode(ref_txt)
-            token_truth_labels, incorrect = token_align(tokens, ref, wtokenizer)
-            
-            for token, attn_state, dec_state, sm_prob, label in zip(tokens, attn_features, dec_features, sm_probs, 
-                                                                    token_truth_labels):
-                emb = whisper_model.model.decoder.token_embedding(torch.tensor([token]).to('cuda')).to('cpu')
-                emb = torch.squeeze(emb)
-                data = torch.cat((torch.tensor([token]), attn_state, dec_state, emb, 
-                                    torch.tensor([sm_prob]), torch.tensor([label]))).tolist()
-                csv_writer.writerow(data)
+            token_truth_labels, word_token_mappings, incorrect = token_align(hyp_txt, ref_txt, tokens, wtokenizer)
 
+            for mapping in word_token_mappings:
+                word = mapping[0]
+                token_indices = mapping[1:]
+                word_data = [word]
+                for idx in token_indices:
+                    token, attn_state, dec_state, sm_prob, label = tokens[idx], attn_features[idx], dec_features[idx], sm_probs[idx], token_truth_labels[idx]
+                    emb = whisper_model.model.decoder.token_embedding(torch.tensor([token]).to('cuda')).to('cpu')
+                    emb = torch.squeeze(emb)
+                    token_data = torch.cat((torch.tensor([token]), attn_state, dec_state, emb, 
+                                            torch.tensor([sm_prob]), torch.tensor([label]))).tolist()
+                    word_data.extend(token_data)
+                csv_writer.writerow(word_data)
             
             # Write transcription data to file
-            hyp_txt = wtokenizer.decode(tokens)
             t_out.write(f'{audio_id}-hyp: {hyp_txt}\n')
             t_out.write(f'{audio_id}-ref: {ref_txt}\n')
             

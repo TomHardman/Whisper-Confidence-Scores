@@ -3,6 +3,7 @@ from whisper.normalizers import EnglishTextNormalizer
 import os
 from difflib import SequenceMatcher
 from xml.dom import INDEX_SIZE_ERR
+from collections import defaultdict
 
 import Levenshtein
 import numpy as np
@@ -13,29 +14,47 @@ from helpers import write_lines, read_parallel_lines, encode_verb_form, \
     apply_reverse_transformation, SEQ_DELIMETERS, START_TOKEN
 
 
-def token_align(hyp, ref, tokenizer, method='Levenshtein'):
-    truth_labels = [1 for _ in range(len(hyp))]
+def token_align(hyp_txt, ref_txt, hyp_tok, tokenizer, method='Levenshtein'):
+    word_truth_labels = [1 for _ in range(len(hyp_txt))]
 
-    if method == 'Levenshtein':
-        edits = Levenshtein.editops(hyp, ref)
-        for edit in edits:
-            tag, hyp_pos, ref_pos = edit
-            if tag == 'delete' or tag == 'replace':
-                truth_labels[hyp_pos] = 0
+    if not hyp_txt or not hyp_tok:
+        print('Error - returning none')
+        return [], [], []
 
-    elif method == 'Gestalt':
-        edits = align_sequences(hyp, ref, for_whisper=True)
-        raise NotImplementedError
+    hyp_txt = hyp_txt.split(' ')
+    ref_txt = ref_txt.split(' ')
+
+    edits = Levenshtein.editops(hyp_txt, ref_txt)
+    for edit in edits:
+        tag, hyp_pos, ref_pos = edit
+        if tag == 'delete' or tag == 'replace':
+            word_truth_labels[hyp_pos] = 0
     
-    else:
-        raise ValueError('Method must be Gestalt or Levenshtein')
+    i = -1
+    word_token_mappings = [] # list of tuples to store indices of hypothesis tokens associated with each word
+    token_truth_labels = [None for _ in range(len(hyp_tok))]
+    current_mapping = []
+    
+    for j, tok in enumerate(hyp_tok):
+        if i==-1 or tokenizer.decode([tok]) and tokenizer.decode([tok])[0] == ' ':
+            i += 1
+            if current_mapping:
+                word_token_mappings.append(tuple(current_mapping))
+                current_mapping = []
+            current_mapping.append(hyp_txt[i])
+
+        lab = word_truth_labels[i]
+        token_truth_labels[j] = lab
+        current_mapping.append(j)
+    
+    word_token_mappings.append(tuple(current_mapping))
     
     incorrect = []
-    for lab, tok  in zip(truth_labels, hyp):
-        if lab == 0:
-            incorrect.append(tokenizer.decode([tok]))
+    for i, label in enumerate(word_truth_labels):
+        if label == 0:
+            incorrect.append(hyp_txt[i])
     
-    return truth_labels, incorrect
+    return token_truth_labels, word_token_mappings, incorrect
 
 
 def perfect_align(t, T, insertions_allowed=0,

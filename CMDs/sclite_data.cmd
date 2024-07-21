@@ -1,0 +1,10 @@
+/scratches/dialfs/alta/linguaskill/exp-st941/whisper-sla/tools/scripts/sclite_data.py --input_pair exp/small.en/flt_prompt0_lr1e-5_lower/transcribe/True_test_beam5_stampFalse_nonorm --wer_type htk-align
+/scratches/dialfs/alta/linguaskill/exp-st941/whisper-sla/tools/scripts/sclite_data.py --input_pair exp/small.en/flt_prompt0_lr1e-5_lower/transcribe/True_test_beam5_stampFalse_nonorm --wer_type htk-align
+/scratches/dialfs/alta/linguaskill/exp-st941/whisper-sla/tools/scripts/sclite_data.py --input_pair exp/small.en/flt_prompt0_lr1e-5_lower/transcribe/True_test_beam5_stampFalse_nonorm --wer_type htk-align
+/scratches/dialfs/alta/linguaskill/exp-st941/whisper-sla/tools/scripts/sclite_data.py --input_pair exp/small.en/flt_prompt0_lr1e-5_lower/transcribe/True_test_beam5_stampFalse_nonorm --wer_type htk-align
+/scratches/dialfs/alta/linguaskill/exp-st941/whisper-sla/tools/scripts/sclite_data.py --input_pair exp/small.en/flt_prompt0_lr1e-5_lower/transcribe/True_test_beam5_stampFalse_nonorm --wer_type htk-align
+/scratches/dialfs/alta/linguaskill/exp-st941/whisper-sla/tools/scripts/sclite_data.py --input_pair exp/small.en/flt_prompt0_lr1e-5_lower/transcribe/True_test_beam5_stampFalse_nonorm --wer_type htk-align
+/scratches/dialfs/alta/linguaskill/exp-st941/whisper-sla/tools/scripts/sclite_data.py --input_pair exp/small.en/flt_prompt0_lr1e-5_lower/transcribe/True_test_beam5_stampFalse_nonorm --wer_type speech
+/scratches/dialfs/alta/linguaskill/exp-st941/whisper-sla/tools/scripts/sclite_data.py --input_pair exp/small.en/flt_prompt0_lr1e-5_lower/transcribe/True_test_beam5_stampFalse_nonorm --wer_type speech
+/scratches/dialfs/alta/linguaskill/exp-st941/whisper-sla/tools/scripts/sclite_data.py --input_pair exp/small.en/flt_prompt0_lr1e-5_lower/transcribe/True_test_beam5_stampFalse_nonorm --wer_type standard
+/scratches/dialfs/alta/linguaskill/exp-st941/whisper-sla/tools/scripts/sclite_data.py --input_pair exp/small.en/flt_prompt0_lr1e-5_lower/transcribe/True_test_beam5_stampFalse_nonorm --wer_type standard

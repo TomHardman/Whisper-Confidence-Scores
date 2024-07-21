@@ -1,0 +1,2 @@
+/scratches/dialfs/alta/linguaskill/exp-st941/whisper-sla/tools/run_sclite.sh exp/small.en/flt_prompt0_lr1e-5_lower/transcribe/True_test_beam5_stampFalse_nonorm standard flt_test exp/sclite
+------------------------------------------------------------------------

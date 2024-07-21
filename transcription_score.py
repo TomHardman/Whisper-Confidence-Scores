@@ -6,7 +6,7 @@ import torch
 from tqdm import tqdm
 from whisper.normalizers import EnglishTextNormalizer
 
-def score_transcriptions(path, tokenizer, normalise_ref=False):
+def score_transcriptions(path, tokenizer, normalise_hyp=True, normalise_ref=True):
     w_errors = 0
     w_refs = 0
     token_errors = 0
@@ -19,14 +19,19 @@ def score_transcriptions(path, tokenizer, normalise_ref=False):
         for line in tqdm(f):
             wav_path = line.split(':')[0]
             if wav_path.split('-')[-1] == 'hyp':
-                hyp = line.split(': ')[1]
+                if normalise_hyp:
+                    hyp = std(line.split(': ')[1])
+                else:
+                    hyp = line.split(': ')[1]
                 hyp_tokens = tokenizer.encode(hyp)
                 wav_hyp = wav_path[:-3]
+
             else:
                 if normalise_ref:
                     ref = std(line.split(': ')[1])
                 else:
                     ref = line.split(': ')[1]
+
                 ref_tokens = tokenizer.encode(ref)
                 wav_ref = wav_path[:-3]
             
@@ -34,7 +39,7 @@ def score_transcriptions(path, tokenizer, normalise_ref=False):
                 w_errors += editdistance.eval(hyp.split(), ref.split())
                 w_refs += len(ref.split())
 
-                token_truth_labels, incorrect = token_align(hyp_tokens, ref_tokens, tokenizer)
+                token_truth_labels, _, incorrect = token_align(hyp, ref, hyp_tokens, tokenizer)
                 token_errors += token_truth_labels.count(0)
                 token_refs += len(ref_tokens)
         
